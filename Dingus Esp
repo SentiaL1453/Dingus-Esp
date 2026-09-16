@@ -1,0 +1,151 @@
+--!optimize 2
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local COLOR_REAL = Color3.fromRGB(0, 255, 120)
+local COLOR_DISTANCE = Color3.fromRGB(255, 255, 255)
+local COLOR_SKELETON = Color3.fromRGB(0, 255, 255)
+
+local SKELETON_CONNECTIONS = {
+    {"Head", "Torso"},
+    {"Torso", "Left Arm"},
+    {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"},
+    {"Torso", "Right Leg"}
+}
+
+_G.DINGUS_REAL_ESP = true
+_G.DINGUS_REAL_ESP_TOKEN = (_G.DINGUS_REAL_ESP_TOKEN or 0) + 1
+local MyToken = _G.DINGUS_REAL_ESP_TOKEN
+
+local function SafePosition(part)
+    if not part then return nil end
+
+    local ok, position = pcall(function()
+        return part.Position
+    end)
+
+    if ok then return position end
+    return nil
+end
+
+local function Distance(a, b)
+    local dx = a.X - b.X
+    local dy = a.Y - b.Y
+    local dz = a.Z - b.Z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+local function DrawText(position, size, color, text)
+    pcall(function()
+        DrawingImmediate.OutlinedText(
+            vector.create(position.X, position.Y, 0),
+            size,
+            color,
+            1,
+            text,
+            true,
+            nil
+        )
+    end)
+end
+
+local function ScreenPoint(camera, part)
+    local position = SafePosition(part)
+    if not position then return nil end
+
+    local ok, screenPosition, onScreen = pcall(function()
+        return camera:WorldToScreenPoint(
+            Vector3.new(position.X, position.Y, position.Z)
+        )
+    end)
+
+    if ok and screenPosition and onScreen then
+        return vector.create(screenPosition.X, screenPosition.Y, 0)
+    end
+
+    return nil
+end
+
+local function DrawSkeleton(camera, rig)
+    if not rig then return end
+
+    for i = 1, #SKELETON_CONNECTIONS do
+        local connection = SKELETON_CONNECTIONS[i]
+        local partA = rig:FindFirstChild(connection[1])
+        local partB = rig:FindFirstChild(connection[2])
+        local pointA = ScreenPoint(camera, partA)
+        local pointB = ScreenPoint(camera, partB)
+
+        if pointA and pointB then
+            pcall(function()
+                DrawingImmediate.Line(
+                    pointA,
+                    pointB,
+                    COLOR_SKELETON,
+                    1,
+                    1,
+                    2
+                )
+            end)
+        end
+    end
+end
+
+RunService.Render:Connect(function()
+    if not _G.DINGUS_REAL_ESP or MyToken ~= _G.DINGUS_REAL_ESP_TOKEN then
+        return
+    end
+
+    local camera = Workspace.CurrentCamera
+    if not camera then return end
+
+    local myRoot = nil
+    if LocalPlayer and LocalPlayer.Character then
+        myRoot = LocalPlayer.Character:FindFirstChild("ControllerRootPart")
+    end
+    local myPosition = SafePosition(myRoot)
+
+    local playerList = Players:GetChildren()
+
+    for i = 1, #playerList do
+        local player = playerList[i]
+
+        if player ~= LocalPlayer and player.ClassName == "Player" then
+            local character = player.Character
+            local root = character and character:FindFirstChild("ControllerRootPart")
+            local rig = character and character:FindFirstChild("Rig")
+            local worldPosition = SafePosition(root)
+
+            if worldPosition then
+                DrawSkeleton(camera, rig)
+
+                local ok, screenPosition, onScreen = pcall(function()
+                    return camera:WorldToScreenPoint(
+                        Vector3.new(worldPosition.X, worldPosition.Y, worldPosition.Z)
+                    )
+                end)
+
+                if ok and screenPosition and onScreen then
+                    DrawText(screenPosition, 17, COLOR_REAL, player.Name)
+
+                    if myPosition then
+                        local studs = math.floor(Distance(myPosition, worldPosition) + 0.5)
+                        DrawText(
+                            vector.create(screenPosition.X, screenPosition.Y + 18, 0),
+                            14,
+                            COLOR_DISTANCE,
+                            tostring(studs) .. " studs"
+                        )
+                    end
+                end
+            end
+        end
+    end
+end)
+
+print("[Dingus ESP] Real-player ESP enabled")
+print("[Dingus ESP] Disable with: _G.DINGUS_REAL_ESP = false")
