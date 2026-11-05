@@ -1,151 +1,161 @@
 --!optimize 2
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-
-local LocalPlayer = Players.LocalPlayer
-local COLOR_REAL = Color3.fromRGB(0, 255, 120)
-local COLOR_DISTANCE = Color3.fromRGB(255, 255, 255)
-local COLOR_SKELETON = Color3.fromRGB(0, 255, 255)
-
-local SKELETON_CONNECTIONS = {
-    {"Head", "Torso"},
-    {"Torso", "Left Arm"},
-    {"Torso", "Right Arm"},
-    {"Torso", "Left Leg"},
-    {"Torso", "Right Leg"}
+-- Dingus real-player ESP: collect/project in PostLocal; Render only draws snapshots.
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local Workspace=game:GetService("Workspace")
+local COLOR_REAL=Color3.fromRGB(0,255,120)
+local COLOR_DISTANCE=Color3.fromRGB(255,255,255)
+local COLOR_SKELETON=Color3.fromRGB(0,255,255)
+local CONNECTIONS={
+    {"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},
+    {"Torso","Left Leg"},{"Torso","Right Leg"},
 }
-
-_G.DINGUS_REAL_ESP = true
-_G.DINGUS_REAL_ESP_TOKEN = (_G.DINGUS_REAL_ESP_TOKEN or 0) + 1
-local MyToken = _G.DINGUS_REAL_ESP_TOKEN
-
-local function SafePosition(part)
+local previous=_G.DINGUS_REAL_ESP_SESSION
+if previous and previous.Stop then previous.Stop() end
+_G.DINGUS_REAL_ESP=true
+_G.DINGUS_REAL_ESP_TOKEN=(_G.DINGUS_REAL_ESP_TOKEN or 0)+1
+local token=_G.DINGUS_REAL_ESP_TOKEN
+local session={Alive=true,Connections={}}
+_G.DINGUS_REAL_ESP_SESSION=session
+local front={Lines={},Texts={}}
+local back={Lines={},Texts={}}
+local targets={}
+local localRoot=nil
+local lastRefresh=-math.huge
+local lastError={}
+local function enabled()
+    return session.Alive and _G.DINGUS_REAL_ESP and token==_G.DINGUS_REAL_ESP_TOKEN
+end
+local function report(stage,err)
+    local now=os.clock()
+    if not lastError[stage] or now-lastError[stage]>=5 then
+        lastError[stage]=now
+        print("[Dingus ESP] "..stage..": "..tostring(err))
+    end
+end
+function session.Stop()
+    if not session.Alive then return end
+    session.Alive=false
+    for _,connection in ipairs(session.Connections) do pcall(function() connection:Disconnect() end) end
+    table.clear(session.Connections)
+    if _G.DINGUS_REAL_ESP_SESSION==session then
+        _G.DINGUS_REAL_ESP_SESSION=nil
+        _G.DINGUS_REAL_ESP=false
+    end
+end
+local function find(object,name)
+    if not object then return nil end
+    local ok,value=pcall(function() return object:FindFirstChild(name) end)
+    if ok then return value end
+    return nil
+end
+local function position(part)
     if not part then return nil end
-
-    local ok, position = pcall(function()
-        return part.Position
-    end)
-
-    if ok then return position end
+    local ok,value=pcall(function() return part.Position end)
+    if ok then return value end
     return nil
 end
-
-local function Distance(a, b)
-    local dx = a.X - b.X
-    local dy = a.Y - b.Y
-    local dz = a.Z - b.Z
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
+local function getRoot(character,rig)
+    return find(character,"ControllerRootPart") or find(character,"HumanoidRootPart")
+        or find(rig,"ControllerRootPart") or find(rig,"HumanoidRootPart")
+        or find(rig,"Torso") or find(rig,"Head")
 end
-
-local function DrawText(position, size, color, text)
-    pcall(function()
-        DrawingImmediate.OutlinedText(
-            vector.create(position.X, position.Y, 0),
-            size,
-            color,
-            1,
-            text,
-            true,
-            nil
-        )
-    end)
-end
-
-local function ScreenPoint(camera, part)
-    local position = SafePosition(part)
-    if not position then return nil end
-
-    local ok, screenPosition, onScreen = pcall(function()
-        return camera:WorldToScreenPoint(
-            Vector3.new(position.X, position.Y, position.Z)
-        )
-    end)
-
-    if ok and screenPosition and onScreen then
-        return vector.create(screenPosition.X, screenPosition.Y, 0)
-    end
-
-    return nil
-end
-
-local function DrawSkeleton(camera, rig)
-    if not rig then return end
-
-    for i = 1, #SKELETON_CONNECTIONS do
-        local connection = SKELETON_CONNECTIONS[i]
-        local partA = rig:FindFirstChild(connection[1])
-        local partB = rig:FindFirstChild(connection[2])
-        local pointA = ScreenPoint(camera, partA)
-        local pointB = ScreenPoint(camera, partB)
-
-        if pointA and pointB then
-            pcall(function()
-                DrawingImmediate.Line(
-                    pointA,
-                    pointB,
-                    COLOR_SKELETON,
-                    1,
-                    1,
-                    2
-                )
-            end)
-        end
-    end
-end
-
-RunService.Render:Connect(function()
-    if not _G.DINGUS_REAL_ESP or MyToken ~= _G.DINGUS_REAL_ESP_TOKEN then
-        return
-    end
-
-    local camera = Workspace.CurrentCamera
-    if not camera then return end
-
-    local myRoot = nil
-    if LocalPlayer and LocalPlayer.Character then
-        myRoot = LocalPlayer.Character:FindFirstChild("ControllerRootPart")
-    end
-    local myPosition = SafePosition(myRoot)
-
-    local playerList = Players:GetChildren()
-
-    for i = 1, #playerList do
-        local player = playerList[i]
-
-        if player ~= LocalPlayer and player.ClassName == "Player" then
-            local character = player.Character
-            local root = character and character:FindFirstChild("ControllerRootPart")
-            local rig = character and character:FindFirstChild("Rig")
-            local worldPosition = SafePosition(root)
-
-            if worldPosition then
-                DrawSkeleton(camera, rig)
-
-                local ok, screenPosition, onScreen = pcall(function()
-                    return camera:WorldToScreenPoint(
-                        Vector3.new(worldPosition.X, worldPosition.Y, worldPosition.Z)
-                    )
-                end)
-
-                if ok and screenPosition and onScreen then
-                    DrawText(screenPosition, 17, COLOR_REAL, player.Name)
-
-                    if myPosition then
-                        local studs = math.floor(Distance(myPosition, worldPosition) + 0.5)
-                        DrawText(
-                            vector.create(screenPosition.X, screenPosition.Y + 18, 0),
-                            14,
-                            COLOR_DISTANCE,
-                            tostring(studs) .. " studs"
-                        )
+local function refreshTargets()
+    local localPlayer=Players.LocalPlayer
+    local localCharacter=localPlayer and localPlayer.Character
+    localRoot=getRoot(localCharacter,find(localCharacter,"Rig"))
+    local nextTargets={}
+    for _,player in ipairs(Players:GetChildren()) do
+        if player~=localPlayer and player.ClassName=="Player" then
+            local character=player.Character
+            if character then
+                local rig=find(character,"Rig") or character
+                local root=getRoot(character,rig)
+                if root then
+                    local segments={}
+                    for _,names in ipairs(CONNECTIONS) do
+                        local a,b=find(rig,names[1]),find(rig,names[2])
+                        if a and b then segments[#segments+1]={a,b} end
                     end
+                    nextTargets[#nextTargets+1]={Name=player.Name,Root=root,Segments=segments}
                 end
             end
         end
     end
+    targets=nextTargets
+end
+local function distance(a,b)
+    local dx,dy,dz=a.X-b.X,a.Y-b.Y,a.Z-b.Z
+    return math.sqrt(dx*dx+dy*dy+dz*dz)
+end
+local function project(camera,world)
+    if not world then return nil end
+    local ok,screen,visible=pcall(function()
+        return camera:WorldToScreenPoint(Vector3.new(world.X,world.Y,world.Z))
+    end)
+    if ok and visible and screen then return Vector2.new(screen.X,screen.Y) end
+    return nil
+end
+local function buildFrame()
+    table.clear(back.Lines)
+    table.clear(back.Texts)
+    if not enabled() then front,back=back,front;return end
+    -- All Instance properties and methods are accessed outside Render.
+    local camera=Workspace.CurrentCamera
+    if not camera then front,back=back,front;return end
+    local now=os.clock()
+    if now-lastRefresh>=0.25 then
+        refreshTargets()
+        lastRefresh=now
+    end
+    local myPosition=position(localRoot)
+    local pointCache={}
+    local function point(part)
+        if pointCache[part]~=nil then return pointCache[part] or nil end
+        local value=project(camera,position(part))
+        pointCache[part]=value or false
+        return value
+    end
+    for _,target in ipairs(targets) do
+        local world=position(target.Root)
+        if world then
+            for _,segment in ipairs(target.Segments) do
+                local a,b=point(segment[1]),point(segment[2])
+                if a and b then back.Lines[#back.Lines+1]={a,b} end
+            end
+            local screen=project(camera,world)
+            if screen then
+                back.Texts[#back.Texts+1]={Position=screen,Size=17,Color=COLOR_REAL,Text=target.Name}
+                if myPosition then
+                    back.Texts[#back.Texts+1]={Position=Vector2.new(screen.X,screen.Y+18),Size=14,Color=COLOR_DISTANCE,
+                        Text=tostring(math.floor(distance(myPosition,world)+0.5)).." studs"}
+                end
+            end
+        end
+    end
+    front,back=back,front
+end
+local function drawFrame()
+    if not enabled() then return end
+    local snapshot=front
+    for _,line in ipairs(snapshot.Lines) do
+        DrawingImmediate.Line(line[1],line[2],COLOR_SKELETON,1,1,2)
+    end
+    for _,text in ipairs(snapshot.Texts) do
+        DrawingImmediate.OutlinedText(vector.create(text.Position.X,text.Position.Y,0),text.Size,text.Color,1,text.Text,true,nil)
+    end
+end
+session.Connections[#session.Connections+1]=RunService.PostLocal:Connect(function()
+    local ok,err=pcall(buildFrame)
+    if not ok then
+        table.clear(front.Lines);table.clear(front.Texts)
+        report("Update",err)
+    end
 end)
-
-print("[Dingus ESP] Real-player ESP enabled")
-print("[Dingus ESP] Disable with: _G.DINGUS_REAL_ESP = false")
+session.Connections[#session.Connections+1]=RunService.Render:Connect(function()
+    local ok,err=pcall(drawFrame)
+    if not ok then report("Drawing",err) end
+end)
+print("[Dingus ESP] Enabled | PostLocal updates / Render draws only")
+print("[Dingus ESP] Disable: _G.DINGUS_REAL_ESP = false")
+print("[Dingus ESP] Unload: _G.DINGUS_REAL_ESP_SESSION.Stop()")
